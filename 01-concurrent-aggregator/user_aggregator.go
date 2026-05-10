@@ -2,10 +2,16 @@ package main
 
 import (
 	"context"
-	"log"
+	"errors"
+	"log/slog"
 	"time"
 
 	"golang.org/x/sync/errgroup"
+)
+
+var (
+	ErrTimeout   = errors.New("timeout_exceeded")
+	ErrCancelled = errors.New("cancelled")
 )
 
 type UserAggregate struct {
@@ -18,22 +24,44 @@ type UserAggregator interface {
 }
 
 type userAggregator struct {
-	// TODO: add functional options
 	timeout time.Duration
-	logger  log.Logger
+	logger  *slog.Logger
 
 	profileService ProfileService
 	orderService   OrderService
 }
 
+type Option func(a *userAggregator)
+
+func WithTimeout(t time.Duration) Option {
+	return func(a *userAggregator) {
+		a.timeout = t
+	}
+}
+
+func WithLogger(l *slog.Logger) Option {
+	return func(a *userAggregator) {
+		a.logger = l
+	}
+}
+
 func NewUserAggregator(
 	profileService ProfileService,
 	orderService OrderService,
+	options ...Option,
 ) *userAggregator {
-	return &userAggregator{
+	u := &userAggregator{
 		profileService: profileService,
 		orderService:   orderService,
+		timeout:        10 * time.Second,
+		logger:         slog.Default(),
 	}
+
+	for _, opt := range options {
+		opt(u)
+	}
+
+	return u
 }
 
 func (a *userAggregator) Aggregate(ctx context.Context, id int) (*UserAggregate, error) {
@@ -42,23 +70,36 @@ func (a *userAggregator) Aggregate(ctx context.Context, id int) (*UserAggregate,
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
+		a.logger.Info("Fetching user name")
 		n, err := a.profileService.GetUserName(ctx, id)
 		name = n
 		return err
 	})
 
 	g.Go(func() error {
+		a.logger.Info("Fetching orders count")
 		c, err := a.orderService.GetOrdersCount(ctx, id)
 		orders = c
 		return err
 	})
 
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+	waitCh := make(chan error)
+	defer close(waitCh)
+	go func() {
+		waitCh <- g.Wait()
+	}()
 
-	return &UserAggregate{
-		User:   name,
-		Orders: orders,
-	}, nil
+	select {
+	case err := <-waitCh:
+		if err != nil {
+			a.logger.Error("Can't fetch user aggregate")
+			return nil, err
+		}
+		return &UserAggregate{
+			User:   name,
+			Orders: orders,
+		}, nil
+	case <-time.After(a.timeout):
+		return nil, ErrTimeout
+	}
 }

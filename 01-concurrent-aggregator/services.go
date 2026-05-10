@@ -21,7 +21,10 @@ func (s *ProfileServiceMock) Reset() {
 }
 
 func (s *ProfileServiceMock) GetUserName(ctx context.Context, id int) (string, error) {
-	return s.GetUserNameFunc(ctx, id)
+	if s.GetUserNameFunc != nil {
+		return s.GetUserNameFunc(ctx, id)
+	}
+	return "Alice", nil
 }
 
 type OrderServiceMock struct {
@@ -35,5 +38,8 @@ func (s *OrderServiceMock) Reset() {
 }
 
 func (s *OrderServiceMock) GetOrdersCount(ctx context.Context, id int) (int, error) {
-	return s.GetOrdersCountFunc(ctx, id)
+	if s.GetOrdersCountFunc != nil {
+		return s.GetOrdersCountFunc(ctx, id)
+	}
+	return 5, nil
 }
