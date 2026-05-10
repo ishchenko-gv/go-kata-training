@@ -68,6 +68,8 @@ func (a *userAggregator) Aggregate(ctx context.Context, id int) (*UserAggregate,
 	var name string
 	var orders int
 
+	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		a.logger.Info("Fetching user name")
@@ -83,23 +85,13 @@ func (a *userAggregator) Aggregate(ctx context.Context, id int) (*UserAggregate,
 		return err
 	})
 
-	waitCh := make(chan error)
-	defer close(waitCh)
-	go func() {
-		waitCh <- g.Wait()
-	}()
-
-	select {
-	case err := <-waitCh:
-		if err != nil {
-			a.logger.Error("Can't fetch user aggregate")
-			return nil, err
-		}
-		return &UserAggregate{
-			User:   name,
-			Orders: orders,
-		}, nil
-	case <-time.After(a.timeout):
-		return nil, ErrTimeout
+	if err := g.Wait(); err != nil {
+		a.logger.Error("Can't fetch user aggregate")
+		return nil, err
 	}
+
+	return &UserAggregate{
+		User:   name,
+		Orders: orders,
+	}, nil
 }

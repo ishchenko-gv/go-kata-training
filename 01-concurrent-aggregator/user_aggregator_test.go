@@ -37,8 +37,12 @@ func TestUserAggregator(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		defer resetMocks()
 		orderServiceMock.GetOrdersCountFunc = func(ctx context.Context, id int) (int, error) {
-			time.Sleep(5 * time.Second)
-			return 5, nil
+			select {
+			case <-ctx.Done():
+				return 0, main.ErrTimeout
+			case <-time.After(5 * time.Second):
+				return 5, nil
+			}
 		}
 
 		userAggregator := main.NewUserAggregator(
