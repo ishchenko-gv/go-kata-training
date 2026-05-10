@@ -20,27 +20,26 @@ type WorkerPool interface {
 type workerPool struct {
 	logger     *slog.Logger
 	poolSize   int
-	msgCh      chan string
+	msgCh      MsgCh
 	jobs       chan Job
 	jobIdCount int
 }
 
-func NewWorkerPool(msgCh chan string, poolSize int) *workerPool {
+func NewWorkerPool(msgCh MsgCh, poolSize int) *workerPool {
 	return &workerPool{
 		logger:   slog.Default(),
 		msgCh:    msgCh,
 		poolSize: poolSize,
+		jobs:     make(chan Job, poolSize),
 	}
 }
 
 func (wp *workerPool) Start(ctx context.Context) {
-	wp.logger = slog.Default()
 	wp.logger.Info("Starting worker pool", "pool_size", wp.poolSize)
-	wp.jobs = make(chan Job, wp.poolSize)
 	for range wp.poolSize {
 		go wp.spawnWorker(ctx)
 	}
-	wp.logger.Info("Worker has started")
+	wp.logger.Info("Worker pool has started")
 }
 
 func (wp *workerPool) Stop() {

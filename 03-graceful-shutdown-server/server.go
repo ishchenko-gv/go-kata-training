@@ -17,6 +17,7 @@ type Server interface {
 }
 
 type server struct {
+	signalCh   chan os.Signal
 	logger     *slog.Logger
 	httpServer *http.Server
 	workerPool WorkerPool
@@ -51,6 +52,12 @@ type ServerOption func(s *server)
 func WithServerPort(port int) ServerOption {
 	return func(s *server) {
 		s.httpServer.Addr = fmt.Sprintf(":%d", port)
+	}
+}
+
+func WithSignalChan(ch chan os.Signal) ServerOption {
+	return func(s *server) {
+		s.signalCh = ch
 	}
 }
 
@@ -121,10 +128,9 @@ func startDebugEndpoint() {
 }
 
 func (s *server) listenForInterruption(cancel context.CancelFunc) {
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, os.Interrupt)
+	signal.Notify(s.signalCh, os.Interrupt)
 
-	<-signalCh
+	<-s.signalCh
 	s.logger.Info("Got interruption signal")
 	cancel()
 }

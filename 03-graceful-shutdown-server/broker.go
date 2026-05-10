@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+type MsgCh chan string
+
 type Broker interface {
 	Start(ctx context.Context)
 	Subscribe(client chan string)
@@ -19,7 +21,7 @@ type broker struct {
 	msgCh   chan string
 }
 
-func NewBroker(msgCh chan string) *broker {
+func NewBroker(msgCh MsgCh) *broker {
 	return &broker{
 		logger:  slog.Default(),
 		clients: make(map[chan string]bool),
