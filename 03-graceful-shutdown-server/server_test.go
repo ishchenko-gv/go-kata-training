@@ -9,9 +9,9 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	msgChan := make(chan string)
-	workerPool := server.NewWorkerPool(msgChan, 10)
-	broker := server.NewBroker(msgChan)
+	msgCh := make(chan string)
+	workerPool := server.NewWorkerPool(msgCh, 10)
+	broker := server.NewBroker(msgCh)
 	s := server.NewServer(workerPool, broker, server.WithServerPort(3001))
 	var readyCh = make(chan struct{})
 	go func() {

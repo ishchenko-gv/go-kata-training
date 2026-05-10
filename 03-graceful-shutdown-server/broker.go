@@ -23,6 +23,7 @@ func NewBroker(msgCh chan string) *broker {
 	return &broker{
 		logger:  slog.Default(),
 		clients: make(map[chan string]bool),
+		msgCh:   msgCh,
 	}
 }
 
