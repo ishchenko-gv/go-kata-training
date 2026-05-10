@@ -1,8 +1,8 @@
-package main_test
+package useraggregator_test
 
 import (
 	"context"
-	main "conurrent-aggregator"
+	aggregator "conurrent-aggregator"
 	"errors"
 	"testing"
 	"time"
@@ -12,15 +12,15 @@ import (
 
 func TestUserAggregator(t *testing.T) {
 	ctx := context.Background()
-	profileServiceMock := &main.ProfileServiceMock{}
-	orderServiceMock := &main.OrderServiceMock{}
+	profileServiceMock := &aggregator.ProfileServiceMock{}
+	orderServiceMock := &aggregator.OrderServiceMock{}
 	resetMocks := func() {
 		profileServiceMock.Reset()
 		orderServiceMock.Reset()
 	}
 
 	t.Run("success", func(t *testing.T) {
-		userAggregator := main.NewUserAggregator(
+		userAggregator := aggregator.NewUserAggregator(
 			profileServiceMock,
 			orderServiceMock,
 		)
@@ -28,7 +28,7 @@ func TestUserAggregator(t *testing.T) {
 		got, err := userAggregator.Aggregate(ctx, 1)
 		assert.NoError(t, err)
 
-		assert.Equal(t, &main.UserAggregate{
+		assert.Equal(t, &aggregator.UserAggregate{
 			User:   "Alice",
 			Orders: 5,
 		}, got)
@@ -39,20 +39,20 @@ func TestUserAggregator(t *testing.T) {
 		orderServiceMock.GetOrdersCountFunc = func(ctx context.Context, id int) (int, error) {
 			select {
 			case <-ctx.Done():
-				return 0, main.ErrTimeout
+				return 0, aggregator.ErrTimeout
 			case <-time.After(5 * time.Second):
 				return 5, nil
 			}
 		}
 
-		userAggregator := main.NewUserAggregator(
+		userAggregator := aggregator.NewUserAggregator(
 			profileServiceMock,
 			orderServiceMock,
-			main.WithTimeout(3*time.Second),
+			aggregator.WithTimeout(3*time.Second),
 		)
 
 		got, err := userAggregator.Aggregate(ctx, 1)
-		assert.ErrorIs(t, err, main.ErrTimeout)
+		assert.ErrorIs(t, err, aggregator.ErrTimeout)
 		assert.Nil(t, got)
 	})
 
@@ -67,15 +67,15 @@ func TestUserAggregator(t *testing.T) {
 			var err error
 			select {
 			case <-ctx.Done():
-				err = main.ErrCancelled
+				err = aggregator.ErrCancelled
 			case <-time.After(3 * time.Second):
 			}
-			assert.ErrorIs(t, err, main.ErrCancelled)
+			assert.ErrorIs(t, err, aggregator.ErrCancelled)
 			ordersCountCalled = true
 			return 0, err
 		}
 
-		userAggregator := main.NewUserAggregator(
+		userAggregator := aggregator.NewUserAggregator(
 			profileServiceMock,
 			orderServiceMock,
 		)

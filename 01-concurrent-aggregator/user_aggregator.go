@@ -1,4 +1,4 @@
-package main
+package useraggregator
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 var (
 	ErrTimeout   = errors.New("timeout_exceeded")
-	ErrCancelled = errors.New("cancelled")
+	ErrCancelled = errors.New("context_cancelled")
 )
 
 type UserAggregate struct {
