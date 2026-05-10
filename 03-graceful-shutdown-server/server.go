@@ -62,7 +62,7 @@ func (s *server) Start() error {
 	go s.workerPool.Start(ctx)
 	go s.broker.Start(ctx)
 
-	s.httpServer.Handler = http.HandlerFunc(s.handleHttp)
+	s.httpServer.Handler = s.setupHandler(ctx)
 	go s.httpServer.ListenAndServe()
 
 	<-ctx.Done()
@@ -70,15 +70,15 @@ func (s *server) Start() error {
 	return nil
 }
 
-func (s *server) handleHttp(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && r.URL.Path == "/schedule-job" {
+func (s *server) setupHandler(ctx context.Context) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/schedule-job", func(w http.ResponseWriter, r *http.Request) {
 		j := Job{}
 		s.workerPool.Schedule(r.Context(), j)
 		w.WriteHeader(http.StatusAccepted)
-		return
-	}
+	})
 
-	if r.Method == http.MethodGet && r.URL.Path == "/jobs-status" {
+	mux.HandleFunc("/jobs-status", func(w http.ResponseWriter, r *http.Request) {
 		f, ok := w.(http.Flusher)
 		if !ok {
 			return
@@ -96,6 +96,10 @@ func (s *server) handleHttp(w http.ResponseWriter, r *http.Request) {
 
 		for {
 			select {
+			case <-ctx.Done():
+				fmt.Fprintf(w, "event: shutdown\ndata: server is closing\n\n")
+				f.Flush()
+				return
 			case <-r.Context().Done():
 				return
 			case msg := <-client:
@@ -103,9 +107,13 @@ func (s *server) handleHttp(w http.ResponseWriter, r *http.Request) {
 				f.Flush()
 			}
 		}
-	}
+	})
 
-	http.Error(w, "Route not found", http.StatusNotFound)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Route not found", http.StatusNotFound)
+	})
+
+	return mux
 }
 
 func startDebugEndpoint() {
