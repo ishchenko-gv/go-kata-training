@@ -9,7 +9,10 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	s := server.NewServer()
+	msgChan := make(chan string)
+	workerPool := server.NewWorkerPool(msgChan, 10)
+	broker := server.NewBroker(msgChan)
+	s := server.NewServer(workerPool, broker, server.WithServerPort(3001))
 	var readyCh = make(chan struct{})
 	go func() {
 		s.Start()
@@ -17,7 +20,7 @@ func TestServer(t *testing.T) {
 	}()
 	<-readyCh
 
-	req, err := http.NewRequest(http.MethodPost, "http://localhost:3000/schedule-job", nil)
+	req, err := http.NewRequest(http.MethodPost, "http://localhost:3001/schedule-job", nil)
 	assert.NoError(t, err)
 
 	c := http.DefaultClient

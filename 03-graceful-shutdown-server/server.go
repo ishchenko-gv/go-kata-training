@@ -9,7 +9,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"time"
 )
 
 type Server interface {
@@ -20,30 +19,50 @@ type Server interface {
 type server struct {
 	logger     *slog.Logger
 	httpServer *http.Server
-	workerPool *workerPool
+	workerPool WorkerPool
+	broker     Broker
 }
 
 var _ Server = (*server)(nil)
 
-func NewServer() *server {
-	return &server{
+func NewServer(
+	workerPool WorkerPool,
+	broker Broker,
+	options ...ServerOption,
+) *server {
+	s := &server{
 		logger: slog.Default(),
-		workerPool: &workerPool{
-			poolSize: 10,
+		httpServer: &http.Server{
+			Addr: ":3000",
 		},
+		workerPool: workerPool,
+		broker:     broker,
+	}
+
+	for _, opt := range options {
+		opt(s)
+	}
+
+	return s
+}
+
+type ServerOption func(s *server)
+
+func WithServerPort(port int) ServerOption {
+	return func(s *server) {
+		s.httpServer.Addr = fmt.Sprintf(":%d", port)
 	}
 }
 
 func (s *server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
-	s.httpServer = &http.Server{
-		Addr:    ":3000",
-		Handler: http.HandlerFunc(s.handleHttp),
-	}
 
 	go startDebugEndpoint()
 	go s.listenForInterruption(cancel)
 	go s.workerPool.Start(ctx)
+	go s.broker.Start(ctx)
+
+	s.httpServer.Handler = http.HandlerFunc(s.handleHttp)
 	go s.httpServer.ListenAndServe()
 
 	<-ctx.Done()
@@ -53,17 +72,37 @@ func (s *server) Start() error {
 
 func (s *server) handleHttp(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && r.URL.Path == "/schedule-job" {
-		doneCh := make(chan []byte)
-		j := Job{
-			done: doneCh,
-		}
+		j := Job{}
 		s.workerPool.Schedule(r.Context(), j)
-
-		_, err := w.Write(<-doneCh)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+		w.WriteHeader(http.StatusAccepted)
 		return
+	}
+
+	if r.Method == http.MethodGet && r.URL.Path == "/jobs-status" {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+
+		client := make(chan string)
+		s.broker.Subscribe(client)
+		s.logger.Info("Client connected", "addr", r.RemoteAddr)
+		defer func() {
+			s.broker.Unsubscribe(client)
+			s.logger.Info("Client disconnected", "addr", r.RemoteAddr)
+		}()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case msg := <-client:
+				fmt.Fprintf(w, "data: %s\n\n", msg)
+				f.Flush()
+			}
+		}
 	}
 
 	http.Error(w, "Route not found", http.StatusNotFound)
@@ -87,57 +126,4 @@ func (s *server) Stop(ctx context.Context) error {
 	s.httpServer.Shutdown(ctx)
 	s.workerPool.Stop()
 	return nil
-}
-
-type Job struct {
-	id   int
-	done chan []byte
-}
-
-type workerPool struct {
-	logger     *slog.Logger
-	poolSize   int
-	jobs       chan Job
-	jobIdCount int
-}
-
-func (wp *workerPool) Start(ctx context.Context) {
-	wp.logger = slog.Default()
-	wp.logger.Info("Starting worker pool", "pool_size", wp.poolSize)
-	wp.jobs = make(chan Job, wp.poolSize)
-	for range wp.poolSize {
-		go wp.spawnWorker(ctx)
-	}
-	wp.logger.Info("Worker has started")
-}
-
-func (wp *workerPool) Stop() {
-	wp.logger.Info("Closing jobs chanel")
-	close(wp.jobs)
-}
-
-func (wp *workerPool) Schedule(ctx context.Context, job Job) {
-	wp.jobIdCount++
-	job.id = wp.jobIdCount
-	wp.logger.Info("Schediling job", "id", job.id)
-	wp.jobs <- job
-	wp.logger.Info("Job has been scheduled", "id", job.id)
-}
-
-func (wp *workerPool) spawnWorker(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			wp.logger.Info("Context cancelled in worker")
-			return
-		case j := <-wp.jobs:
-			start := time.Now()
-			wp.logger.Info("Processing job", "id", j.id)
-			time.Sleep(3 * time.Second)
-			wp.logger.Info("Job has finished", "id", j.id, "duration", time.Since(start).String())
-
-			result := fmt.Sprintf(`{"status":"ok","jobId":%d}`, j.id)
-			j.done <- []byte(result)
-		}
-	}
 }
